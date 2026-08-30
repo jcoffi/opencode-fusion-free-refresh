@@ -1,0 +1,20 @@
+{
+  "name": "opencode-fusion-free-refresh",
+  "version": "0.1.0",
+  "description": "opencode plugin: keeps OpenRouter fusion free-variant model pins current and persists them to opencode.json",
+  "type": "module",
+  "main": "index.ts",
+  "exports": "./index.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jcoffi/opencode-fusion-free-refresh.git"
+  },
+  "keywords": ["opencode", "opencode-plugin", "openrouter", "fusion"],
+  "engines": {
+    "opencode": ">=1.18.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "*"
+  }
+}
