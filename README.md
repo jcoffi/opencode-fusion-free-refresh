@@ -56,6 +56,18 @@ JSON-validated before commit. Any error leaves file and config untouched.
 }
 ```
 
+Panel sizes are configurable via the options tuple (1-8 each; defaults 3 and 2):
+
+```json
+{
+  "plugin": [["opencode-fusion-free-refresh", { "freePanel": 6, "freeFastPanel": 3 }]]
+}
+```
+
+The `free` panel takes the top models by usage. The `free-fast` panel takes the
+lowest p50 endpoint latency (last 30m) among the top usage candidates, probed
+from `/api/v1/models/{id}/endpoints`.
+
 Note: opencode skips external plugins under `--pure`; such instances still
 read the last-synced pins from the config file.
 

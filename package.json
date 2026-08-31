@@ -1,6 +1,6 @@
 {
   "name": "opencode-fusion-free-refresh",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "opencode plugin: keeps OpenRouter fusion free-variant model pins current and persists them to opencode.json",
   "type": "module",
   "main": "index.ts",

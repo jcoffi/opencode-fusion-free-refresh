@@ -36,12 +36,29 @@ const MEM_TTL_MS = 6 * 60 * 60 * 1000 // in-memory refresh: fetch at most every 
 const FETCH_TIMEOUT_MS = 8000
 const MIN_MODELS = 4
 const MIN_CONTEXT = 65536
-const PANEL = { free: 3, "free-fast": 2 } as const
+const LATENCY_POOL = 10 // usage-ranked candidates probed for endpoint latency
+
+// Panel sizes; override via plugin options tuple:
+//   ["github:jcoffi/opencode-fusion-free-refresh", { "freePanel": 6, "freeFastPanel": 3 }]
+// free panel = top usage; free-fast panel = lowest p50 latency among candidates.
+type Options = { freePanel?: number; freeFastPanel?: number }
+const DEFAULTS = { freePanel: 3, freeFastPanel: 2 }
+
+function panelSizes(options: unknown): { freePanel: number; freeFastPanel: number } {
+  const o = (options ?? {}) as Options
+  const clamp = (v: unknown, dflt: number) =>
+    typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 8 ? v : dflt
+  return {
+    freePanel: clamp(o.freePanel, DEFAULTS.freePanel),
+    freeFastPanel: clamp(o.freeFastPanel, DEFAULTS.freeFastPanel),
+  }
+}
 
 type Cache = {
   ts: number
-  models: string[] // ranked catalog ids, best first
+  models: string[] // ranked catalog ids by usage, best first
   catalog: string[] // ALL live :free ids at fetch time (delisting check on cache hits)
+  fast: string[] // usage-ranked candidates re-sorted by p50 endpoint latency, fastest first
   last_error?: string
   applied?: { analyst: string; free: string[]; freeFast: string[] }
   file?: string // stable | written(...) | failed: ...
@@ -61,7 +78,9 @@ function readCache(): Cache | undefined {
       Array.isArray(raw.models) &&
       raw.models.every((m) => typeof m === "string") &&
       Array.isArray(raw.catalog) &&
-      raw.catalog.every((m) => typeof m === "string")
+      raw.catalog.every((m) => typeof m === "string") &&
+      Array.isArray(raw.fast) &&
+      raw.fast.every((m) => typeof m === "string")
     )
       return raw
   } catch {}
@@ -98,7 +117,22 @@ async function getJSON(url: string, token?: string): Promise<unknown> {
   return res.json()
 }
 
-async function fetchLive(): Promise<{ models: string[]; catalog: string[] }> {
+// p50 latency (ms, last 30m) across a model's endpoints; Infinity when unknown
+async function fetchLatency(id: string): Promise<number> {
+  try {
+    const raw = (await getJSON(`https://openrouter.ai/api/v1/models/${id}/endpoints`)) as {
+      data?: { endpoints?: Array<{ latency_last_30m?: { p50?: number } }> }
+    }
+    const p50s = (raw.data?.endpoints ?? [])
+      .map((e) => e.latency_last_30m?.p50)
+      .filter((v): v is number => typeof v === "number" && v > 0)
+    return p50s.length ? Math.min(...p50s) : Infinity
+  } catch {
+    return Infinity
+  }
+}
+
+async function fetchLive(): Promise<{ models: string[]; catalog: string[]; fast: string[] }> {
   const key = apiKey()
   if (!key) throw new Error("no OpenRouter API key in env or auth.json")
 
@@ -144,7 +178,17 @@ async function fetchLive(): Promise<{ models: string[]; catalog: string[] }> {
     .map((m) => m.id)
 
   if (models.length < MIN_MODELS) throw new Error(`only ${models.length} eligible free models`)
-  return { models, catalog }
+
+  // latency ranking for the fast panel: probe endpoint stats for the top
+  // usage-ranked candidates after the analyst (bounded fan-out)
+  const candidates = models.slice(1, 1 + LATENCY_POOL)
+  const latencies = await Promise.all(candidates.map(fetchLatency))
+  const fast = candidates
+    .map((id, i) => ({ id, ms: latencies[i] }))
+    .sort((a, b) => a.ms - b.ms)
+    .map((m) => m.id)
+
+  return { models, catalog, fast }
 }
 
 async function getSelection(): Promise<Cache | undefined> {
@@ -154,13 +198,13 @@ async function getSelection(): Promise<Cache | undefined> {
   }
   try {
     const live = await fetchLive()
-    return { ts: Date.now(), models: live.models, catalog: live.catalog }
+    return { ts: Date.now(), models: live.models, catalog: live.catalog, fast: live.fast }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (cached && cached.models.length >= MIN_MODELS) {
       return { ...cached, last_error: `stale cache used: ${message}` }
     }
-    writeCache({ ts: Date.now(), models: [], catalog: [], last_error: message })
+    writeCache({ ts: Date.now(), models: [], catalog: [], fast: [], last_error: message })
     return undefined
   }
 }
@@ -293,7 +337,8 @@ function persistSelection(catalog: string[], analyst: string, free: string[], fr
 
 // --- plugin -------------------------------------------------------------
 
-export default (async () => {
+export default (async (_input, options) => {
+  const sizes = panelSizes(options)
   return {
     config: async (cfg) => {
       try {
@@ -314,9 +359,13 @@ export default (async () => {
         if (!cache) return
 
         const [analyst, ...rest] = cache.models
-        const freePanel = rest.slice(0, PANEL.free)
-        const fastPanel = rest.slice(0, PANEL["free-fast"])
-        if (freePanel.length < PANEL.free || fastPanel.length < PANEL["free-fast"]) return
+        const freePanel = rest.slice(0, sizes.freePanel)
+        // fastest by p50 endpoint latency; backfill from usage order if the
+        // latency ranking is short (old cache, probe failures)
+        const fastPanel = [...new Set([...cache.fast, ...rest])]
+          .filter((id) => id !== analyst)
+          .slice(0, sizes.freeFastPanel)
+        if (freePanel.length < sizes.freePanel || fastPanel.length < sizes.freeFastPanel) return
 
         // tier 1: in-memory, every startup
         free.model = analyst
