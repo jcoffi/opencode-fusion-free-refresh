@@ -277,10 +277,15 @@ function fusionEntry(variant: unknown): FusionEntry | undefined {
   return plugins.find((p) => (p as FusionEntry)?.id === "fusion") as FusionEntry | undefined
 }
 
-// Optional standalone alias model whose options carry the same free fusion
-// config, so the free panel is selectable directly from the model list
-// (opencode does not surface variants as selectable models).
-const ALIAS = "openrouter/fusion-free"
+// Optional standalone alias models whose options carry the same fusion
+// configs, so the panels are selectable directly from the model list
+// (opencode does not surface variants as selectable models). Each alias is
+// synced when present and ignored when absent. Values name the panel used:
+// "free" = usage panel, "fast" = latency panel.
+const ALIASES = {
+  "openrouter/fusion-free": "free",
+  "openrouter/fusion-free-fast": "fast",
+} as const
 
 // pins currently in the FILE (not the session config, which we may have mutated)
 function filePins(raw: string): string[] {
@@ -299,16 +304,16 @@ function filePins(raw: string): string[] {
     for (const m of entry?.analysis_models ?? []) pins.push(m)
   }
   for (const name of ["free", "free-fast"]) collect(fusionEntry(variants?.[name]))
-  collect(fusionEntry(models?.[ALIAS]?.options))
+  for (const name of Object.keys(ALIASES)) collect(fusionEntry(models?.[name]?.options))
   return [...new Set(pins)]
 }
 
-function hasAlias(raw: string): boolean {
+function hasAlias(raw: string, name: string): boolean {
   try {
     const parsed = JSON.parse(raw) as {
       provider?: { openrouter?: { models?: Record<string, { options?: unknown }> } }
     }
-    return Boolean(fusionEntry(parsed.provider?.openrouter?.models?.[ALIAS]?.options))
+    return Boolean(fusionEntry(parsed.provider?.openrouter?.models?.[name]?.options))
   } catch {
     return false
   }
@@ -324,7 +329,9 @@ function persistSelection(catalog: string[], analyst: string, free: string[], fr
 
   let next = replacePins(original, "free", analyst, free)
   next = replacePins(next, "free-fast", analyst, freeFast)
-  if (hasAlias(original)) next = replacePins(next, ALIAS, analyst, free)
+  for (const [name, panel] of Object.entries(ALIASES)) {
+    if (hasAlias(original, name)) next = replacePins(next, name, analyst, panel === "fast" ? freeFast : free)
+  }
   if (next === original) return "stable"
 
   JSON.parse(next) // never write invalid JSON

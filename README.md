@@ -95,5 +95,11 @@ alias model whose `options` carry the same fusion config:
 }
 ```
 
-If present, this plugin keeps its pins in sync with the variants. If absent,
-everything works as before.
+Two alias names are recognized and synced when present (absent = no-op):
+
+- `openrouter/fusion-free` - gets the usage-ranked panel (`freePanel` size)
+- `openrouter/fusion-free-fast` - gets the latency-ranked panel
+  (`freeFastPanel` size); extra fields like `preset` are preserved
+
+This makes the panels selectable in the model list and usable as `model` /
+`small_model` values (e.g. `"small_model": "openrouter/openrouter/fusion-free-fast"`).
