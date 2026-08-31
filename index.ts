@@ -232,19 +232,41 @@ function fusionEntry(variant: unknown): FusionEntry | undefined {
   return plugins.find((p) => (p as FusionEntry)?.id === "fusion") as FusionEntry | undefined
 }
 
+// Optional standalone alias model whose options carry the same free fusion
+// config, so the free panel is selectable directly from the model list
+// (opencode does not surface variants as selectable models).
+const ALIAS = "openrouter/fusion-free"
+
 // pins currently in the FILE (not the session config, which we may have mutated)
 function filePins(raw: string): string[] {
   const parsed = JSON.parse(raw) as {
-    provider?: { openrouter?: { models?: Record<string, { variants?: Record<string, unknown> }> } }
+    provider?: {
+      openrouter?: {
+        models?: Record<string, { variants?: Record<string, unknown>; options?: unknown }>
+      }
+    }
   }
-  const variants = parsed.provider?.openrouter?.models?.["openrouter/fusion"]?.variants
+  const models = parsed.provider?.openrouter?.models
+  const variants = models?.["openrouter/fusion"]?.variants
   const pins: string[] = []
-  for (const name of ["free", "free-fast"]) {
-    const entry = fusionEntry(variants?.[name])
+  const collect = (entry: FusionEntry | undefined) => {
     if (entry?.model) pins.push(entry.model)
     for (const m of entry?.analysis_models ?? []) pins.push(m)
   }
+  for (const name of ["free", "free-fast"]) collect(fusionEntry(variants?.[name]))
+  collect(fusionEntry(models?.[ALIAS]?.options))
   return [...new Set(pins)]
+}
+
+function hasAlias(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as {
+      provider?: { openrouter?: { models?: Record<string, { options?: unknown }> } }
+    }
+    return Boolean(fusionEntry(parsed.provider?.openrouter?.models?.[ALIAS]?.options))
+  } catch {
+    return false
+  }
 }
 
 // Sync the file to the current selection; write only when content differs.
@@ -257,6 +279,7 @@ function persistSelection(catalog: string[], analyst: string, free: string[], fr
 
   let next = replacePins(original, "free", analyst, free)
   next = replacePins(next, "free-fast", analyst, freeFast)
+  if (hasAlias(original)) next = replacePins(next, ALIAS, analyst, free)
   if (next === original) return "stable"
 
   JSON.parse(next) // never write invalid JSON

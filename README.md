@@ -66,3 +66,22 @@ Inspect `~/.cache/opencode/fusion-free-refresh.json`:
 - `file`: `stable` | `written(ranking drift)` | `written(delisted: ...)` | `failed: ...`
 - `applied`: the analyst and panels applied to the session config
 - `last_error`: fetch failures (stale cache is used when available)
+
+## Optional: selectable model entry
+
+opencode does not surface variants as selectable models — they live behind the
+TUI's "Switch model variant" dialog, `--variant`, or an agent's `variant:`
+field. To make the free panel directly selectable in the model list, add an
+alias model whose `options` carry the same fusion config:
+
+```json
+"openrouter/fusion-free": {
+  "id": "openrouter/fusion",
+  "name": "Fusion Free (deliberation, zero-cost)",
+  "tool_call": false,
+  "options": { "plugins": [{ "id": "fusion", "analysis_models": [], "model": "" }] }
+}
+```
+
+If present, this plugin keeps its pins in sync with the variants. If absent,
+everything works as before.
