@@ -117,10 +117,11 @@ async function getJSON(url: string, token?: string): Promise<unknown> {
   return res.json()
 }
 
-// p50 latency (ms, last 30m) across a model's endpoints; Infinity when unknown
-async function fetchLatency(id: string): Promise<number> {
+// p50 latency (ms, last 30m) across a model's endpoints; Infinity when unknown.
+// NOTE: the latency_last_30m stats are only present on AUTHENTICATED requests.
+async function fetchLatency(id: string, key: string): Promise<number> {
   try {
-    const raw = (await getJSON(`https://openrouter.ai/api/v1/models/${id}/endpoints`)) as {
+    const raw = (await getJSON(`https://openrouter.ai/api/v1/models/${id}/endpoints`, key)) as {
       data?: { endpoints?: Array<{ latency_last_30m?: { p50?: number } }> }
     }
     const p50s = (raw.data?.endpoints ?? [])
@@ -182,7 +183,7 @@ async function fetchLive(): Promise<{ models: string[]; catalog: string[]; fast:
   // latency ranking for the fast panel: probe endpoint stats for the top
   // usage-ranked candidates after the analyst (bounded fan-out)
   const candidates = models.slice(1, 1 + LATENCY_POOL)
-  const latencies = await Promise.all(candidates.map(fetchLatency))
+  const latencies = await Promise.all(candidates.map((id) => fetchLatency(id, key)))
   const fast = candidates
     .map((id, i) => ({ id, ms: latencies[i] }))
     .sort((a, b) => a.ms - b.ms)
